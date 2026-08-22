@@ -16,8 +16,11 @@ a JSON `number`. `age` is a normal `number`. This is documented in Swagger via
 |---|---|
 | Valid `{ name, age, position, salary }` | `201 Created`, full employee row (incl. generated `id`, `createdAt`, `updatedAt`), enqueues an `employee-created` job. |
 | Missing/empty `name` or `position` | `400 Bad Request`. |
+| `name` or `position` over 255 characters | `400 Bad Request` (`@MaxLength(255)` — found by `test/api/fuzz.e2e-spec.ts`, an unbounded Prisma `TEXT` column had no upper bound before this). |
+| `name` or `position` containing a control character (incl. a NUL byte) | `400 Bad Request` (`@Matches` — a NUL byte previously reached Postgres and 500'd at the encoding level; found by fuzz testing). |
 | `age` outside 16-100, non-integer, or missing | `400 Bad Request`. |
 | Negative `salary` or missing | `400 Bad Request`. |
+| `salary` >= `999,999,999,999.99` | `400 Bad Request` (`@Max`, matching the `Decimal(14,2)` column's actual range — previously reached Postgres and 500'd as "numeric field overflow"; found by fuzz testing). |
 | Extra body fields (e.g. a client-supplied `id`) | Silently stripped by `ValidationPipe({ whitelist: true, forbidNonWhitelisted: true })` — actually `forbidNonWhitelisted` turns this into a `400` rather than a silent strip, so a client trying to set its own `id` on create gets a hard rejection, not a quiet ignore. |
 
 ## GET /employees

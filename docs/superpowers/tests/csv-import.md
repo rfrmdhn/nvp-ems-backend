@@ -54,10 +54,12 @@ files on disk (`fs.mkdtempSync`) with `PrismaService`/`NotificationsService` moc
   ~65-67MB in both cases — empirically confirms the "never buffer the whole file" claim, not just
   by code inspection.
 
-One genuine gap surfaced by `test/api/fuzz.e2e-spec.ts` while covering this area: a row with the
-**wrong column count** (structurally malformed, not just semantically invalid) makes `csv-parse`
-itself throw from inside the streaming loop, which the processor's outer `try/catch` treats as
-fatal — the whole job ends in `failed`, not skip-and-collect, contradicting `AUDIT.md` #3's
-documented resolution. See `API_Test_Report.md` for the reproduction and recommended fix
-(`relax_column_count: true` + an explicit column-count check inside `validateRow`); not fixed in
-this pass.
+One genuine gap surfaced by `test/api/fuzz.e2e-spec.ts` while covering this area, **now fixed**: a
+row with the **wrong column count** (structurally malformed, not just semantically invalid) made
+`csv-parse` itself throw from inside the streaming loop, which the processor's outer `try/catch`
+treated as fatal — the whole job ended in `failed`, not skip-and-collect, contradicting
+`AUDIT.md` #3's documented resolution. Fixed by passing `relax_column_count: true` to `csv-parse`
+(`src/queue/processors/csv-import.processor.ts`) — a short row's missing fields now surface as
+`undefined`, which `validateRow()` already rejects with a specific reason, so no separate
+column-count check was needed. See `API_Test_Report.md` §8 (Finding A) for the reproduction and
+re-verification.

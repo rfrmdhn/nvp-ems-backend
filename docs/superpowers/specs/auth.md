@@ -18,6 +18,7 @@ Behavior/edge cases for `POST /auth/login`. See `EMS-BACKEND-PLAN.md` §4.
 | Malformed email (not `@`-shaped) | `400 Bad Request` (`@IsEmail()`). |
 | Empty-string password | `400 Bad Request` (`@MinLength(1)`). |
 | Extra unexpected body fields | Stripped silently by `ValidationPipe({ whitelist: true })`, not an error. |
+| 26th+ login attempt from the same IP within 60s | `429 Too Many Requests` (`@nestjs/throttler`'s `ThrottlerGuard`, applied only to this route — see API_Test_Report.md finding E). |
 
 ## Protected routes (any Employees/CSV-import endpoint)
 
@@ -30,4 +31,3 @@ Behavior/edge cases for `POST /auth/login`. See `EMS-BACKEND-PLAN.md` §4.
 ## Non-goals for this phase
 
 - No refresh tokens, no logout/revocation endpoint (JWT is stateless, expires naturally).
-- No rate limiting on login attempts (see `FEATURE-IDEAS.md`).

@@ -33,7 +33,9 @@ Both items below are done, as part of the fuller 9-type API test pass documented
 - Every Employees route 401s without a JWT, plus tampered/expired/`alg: none` JWTs — no longer
   code-inspection-only — `test/api/security.e2e-spec.ts`.
 
-See `API_Test_Report.md` for the two validation gaps this pass actually found (an unbounded
-`name`/`position` length, and a `salary` value beyond the `Decimal(14,2)` column range 500ing
-instead of 400ing) — both still open, listed there as recommendations rather than fixed in this
-pass.
+This pass also found and fixed three validation gaps in `CreateEmployeeDto`
+(`src/employees/dto/create-employee.dto.ts`), inherited by `UpdateEmployeeDto` via `PartialType`:
+unbounded `name`/`position` length (now `@MaxLength(255)`), control characters including a NUL
+byte in `name`/`position` reaching Postgres as an uncaught 500 (now `@Matches` rejects them), and
+a `salary` beyond the `Decimal(14,2)` column's range 500ing instead of 400ing (now `@Max`). See
+`API_Test_Report.md` §8 (Findings B/C/D) for reproduction and re-verification.

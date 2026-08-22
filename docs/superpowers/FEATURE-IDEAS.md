@@ -5,8 +5,6 @@ scheduled — they're notes for if the reviewer wants to see initiative beyond t
 
 - **Refresh tokens / logout**: current JWT is stateless with a fixed expiry; a refresh-token flow
   or a server-side revocation list would let a compromised token be invalidated before expiry.
-- **Rate limiting on `/auth/login`**: `@nestjs/throttler` on the login route to blunt brute-force
-  attempts against the single seeded admin account.
 - **Notification persistence** (ties into `AUDIT.md` #2): a `Notification` table + `GET
   /notifications` so a client that missed an SSE event while disconnected can catch up.
 - **Employee soft-delete**: status transition instead of hard delete, if audit history of removed

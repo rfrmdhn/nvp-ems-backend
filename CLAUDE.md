@@ -111,11 +111,19 @@ npm run test:stress                    # k6, ramps 10->300 VUs over ~3 min
   `test/load/csv-memory-profile.sh` for the CSV-import memory claim specifically.
 - **Security** — `test/api/security.e2e-spec.ts`: 401 on every guarded route without/with a
   tampered/`alg:none` JWT, mass-assignment (`400` on a client-supplied `id` or unknown field),
-  injection-shaped `search` values treated as literal data.
+  injection-shaped `search` values treated as literal data. Found the login route had no
+  brute-force throttle — fixed via `@nestjs/throttler`, scoped to `POST /auth/login` only
+  (`src/app.module.ts`, `src/auth/auth.controller.ts`).
 - **Fuzz** — `test/api/fuzz.e2e-spec.ts`: malformed JSON, wrong types, huge strings, CSV
-  structural/semantic malformation. Found two real gaps (unbounded name/position length; a
-  wrong-column-count CSV row failing the whole job instead of skip-and-collect) — both documented
-  as open findings in `API_Test_Report.md`, not fixed in this pass.
+  structural/semantic malformation. Found and fixed four real gaps: unbounded `name`/`position`
+  length, a NUL byte reaching Postgres as an uncaught 500, a salary beyond the `Decimal(14,2)`
+  column range doing the same (all three fixed via `@MaxLength`/`@Matches`/`@Max` on
+  `CreateEmployeeDto`), and a wrong-column-count CSV row failing the whole import job instead of
+  skip-and-collect (fixed via `relax_column_count: true` in
+  `src/queue/processors/csv-import.processor.ts`). Load/stress testing separately found that
+  bursty create traffic backlogged `employee-created` notifications by minutes — fixed via
+  `concurrency: 5` on `EmployeeCreatedProcessor`. All five re-verified against the running API —
+  see `API_Test_Report.md`'s "Findings — final status" table.
 
 ## Environments
 
