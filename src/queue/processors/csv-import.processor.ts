@@ -98,7 +98,19 @@ export class CsvImportProcessor extends WorkerHost {
 
     const readStream = createReadStream(filePath);
     const parser = readStream.pipe(
-      parse({ columns: true, trim: true, skip_empty_lines: true }),
+      parse({
+        columns: true,
+        trim: true,
+        skip_empty_lines: true,
+        // A row with the wrong column count (a stray comma, a truncated
+        // export) is exactly the kind of malformed-but-recoverable input
+        // skip-and-collect exists for (see AUDIT.md #3) — without this,
+        // csv-parse throws mid-stream and this.validateRow() never even
+        // sees the row, turning one bad row into a whole-job failure.
+        // With it, a short row's missing fields surface as `undefined`,
+        // which validateRow() already rejects with a specific reason.
+        relax_column_count: true,
+      }),
     );
 
     const reportProgress = async (percent: number): Promise<void> => {

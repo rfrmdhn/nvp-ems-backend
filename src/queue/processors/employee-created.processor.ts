@@ -9,8 +9,16 @@ import { EmployeeCreatedJobData } from '../employee-created.producer';
 /**
  * Fully implemented — this is the concrete end-to-end proof that
  * queue -> worker -> SSE actually works. See EMS-BACKEND-PLAN.md §6.1.
+ *
+ * `concurrency: 5` — at the default of 1, a burst of creates (e.g. a load
+ * test, or several HR users creating employees back-to-back) queues up
+ * behind this processor's deliberate 300ms-per-job demo delay one at a time;
+ * API_Test_Report.md's stress-test run measured ~4,000 backlogged jobs
+ * taking ~20 minutes to drain at concurrency 1. Processing several jobs at
+ * once keeps that delay's demo purpose (still visibly async) while keeping
+ * notification latency bounded under real traffic.
  */
-@Processor(EMPLOYEE_CREATED_QUEUE)
+@Processor(EMPLOYEE_CREATED_QUEUE, { concurrency: 5 })
 export class EmployeeCreatedProcessor extends WorkerHost {
   private readonly logger = new Logger(EmployeeCreatedProcessor.name);
 
