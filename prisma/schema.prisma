@@ -1,0 +1,36 @@
+// EMS backend data model — see EMS-BACKEND-PLAN.md §3 for design rationale.
+// Learn more about Prisma schema syntax: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Single seeded admin user. No distinct "HR" role in this phase — see
+/// docs/superpowers/AUDIT.md #1 and ASSUMPTIONS_MADE.md.
+model Admin {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  @@map("admins")
+}
+
+/// Employee roster. `salary` is Decimal (not Float) to avoid floating-point
+/// rounding on money-like values.
+model Employee {
+  id        String   @id @default(uuid())
+  name      String
+  age       Int
+  position  String
+  salary    Decimal  @db.Decimal(14, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("employees")
+}
