@@ -64,6 +64,8 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@nusantaradigital.test}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+    volumes:
+      - csv_uploads:/app/uploads
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -85,6 +87,8 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@nusantaradigital.test}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+    volumes:
+      - csv_uploads:/app/uploads
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -93,3 +97,4 @@ services:
 
 volumes:
   pg_data:
+  csv_uploads:

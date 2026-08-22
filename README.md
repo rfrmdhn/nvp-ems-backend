@@ -93,17 +93,33 @@ feature and what's intentionally deferred.
 ## CSV import test data
 
 - `scripts/sample-employees.csv` — ~20 realistic rows for a quick manual test.
+- `scripts/sample-employees-large.csv` — 20,000 rows, committed to the repo so the bulk-import
+  path can be exercised at the brief's minimum scale without generating a file first. Verified
+  end-to-end via `docker compose up --build`: uploads in ~20ms (202 Accepted, non-blocking),
+  worker stream-parses + batch-inserts (500 rows/batch) all 20,000 rows in under a second, and
+  `GET /csv-import/:jobId/status` plus the `csv-import.progress`/`.completed` SSE events reflect
+  real progress throughout.
 - `scripts/generate-large-csv.mjs` — generates a large CSV (defaults to 25,000 rows) for testing
-  the bulk-import path at scale:
+  the bulk-import path at an even bigger scale:
   ```bash
   node scripts/generate-large-csv.mjs            # 25000 rows -> scripts/generated-employees.csv
   node scripts/generate-large-csv.mjs 100000      # custom row count
   node scripts/generate-large-csv.mjs 100000 /tmp/big.csv   # custom row count + output path
   ```
 
-Note: the CSV upload endpoint and job are wired up, but the streaming-parse + batched-insert
-worker logic is a documented next-phase TODO — see `EMS-BACKEND-PLAN.md` §8 and
-`docs/superpowers/plans/csv-import.md`.
+The CSV upload endpoint, streaming parse, batched `createMany` insert, and progress reporting
+(polling + SSE) are all real and implemented — see `src/csv-import/` and
+`src/queue/processors/csv-import.processor.ts`.
+
+**Important (Docker/multi-container deployments only):** the `api` and `worker` services run as
+separate containers and must share the same `/app/uploads` directory — `api` writes the uploaded
+file there via Multer, and `worker` reads it back to stream-parse. Both `docker-compose.yml` (this
+repo) and the root-level convenience compose file mount a shared named volume
+(`csv_uploads`/`ems_csv_uploads`) at `/app/uploads` in both services for this reason. If you add a
+new deployment target (e.g. Kubernetes, separate hosts per service), you must provision an
+equivalent shared filesystem for `/app/uploads` — otherwise every CSV import job fails with
+"Uploaded file is missing or unreadable" once the worker tries to read a file only the api
+container's local filesystem has.
 
 ## How the frontend should connect
 
