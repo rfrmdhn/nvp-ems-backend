@@ -78,15 +78,21 @@ function randomRow() {
 async function main() {
   const stream = createWriteStream(outputPath, { encoding: 'utf8' });
 
+  const streamErrorPromise = new Promise((_, reject) => {
+    stream.once('error', reject);
+  });
+
   const writeAsync = (chunk) =>
-    new Promise((resolvePromise, reject) => {
-      if (!stream.write(chunk)) {
-        stream.once('drain', resolvePromise);
-      } else {
-        resolvePromise();
-      }
-      stream.once('error', reject);
-    });
+    Promise.race([
+      new Promise((resolvePromise) => {
+        if (!stream.write(chunk)) {
+          stream.once('drain', resolvePromise);
+        } else {
+          resolvePromise();
+        }
+      }),
+      streamErrorPromise,
+    ]);
 
   await writeAsync('name,age,position,salary\n');
 
