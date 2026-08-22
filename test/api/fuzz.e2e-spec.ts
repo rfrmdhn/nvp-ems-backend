@@ -3,13 +3,15 @@ import { api, authHeader, getAuthToken } from './helpers/client';
 /**
  * Fuzz: malformed/adversarial input across the JSON and multipart surfaces.
  * The bar per the brief: never a crash, never a leaked stack trace, always a
- * graceful (4xx, standard error shape) response — a 500 is only acceptable
- * here if it's still the generic, non-leaking AllExceptionsFilter shape.
- * Two genuine gaps surfaced while writing this suite (both reproduced
- * directly against the running stack, not test artifacts) are asserted
- * against their CURRENT behavior and flagged `FINDING:` rather than silently
- * asserting the "nice" behavior that isn't actually implemented — see
- * API_Test_Report.md for severity/recommendation.
+ * graceful (4xx, standard error shape) response. This suite originally
+ * surfaced four real gaps (see API_Test_Report.md's "Open findings" table
+ * and git history for the pre-fix versions of these tests) — all four are
+ * now fixed in src/, and the tests below assert the fixed behavior:
+ * CreateEmployeeDto rejects control characters, oversized strings, and
+ * out-of-range salaries with a 400 instead of letting them reach Postgres
+ * as an uncaught 500, and csv-import.processor.ts's `relax_column_count`
+ * turns a wrong-column-count CSV row into a normal skipped row instead of
+ * failing the whole job.
  */
 describe('Fuzz', () => {
   let token: string;
@@ -126,55 +128,48 @@ describe('Fuzz', () => {
     createdIds.push(res.body.id);
   });
 
-  it('FINDING: a name containing a NUL byte (0x00) 500s instead of 400', async () => {
+  it('a name containing a NUL byte (0x00) -> 400, never reaches Postgres', async () => {
     const nulName = `Null${String.fromCharCode(0)}Byte${String.fromCharCode(7)}Test`;
     const res = await api()
       .post('/employees')
       .set(authHeader(token))
       .send({ name: nulName, age: 30, position: 'QA', salary: 1000000 });
-    // Reproduced directly against the API: class-validator's @IsString()
-    // accepts any string, including one containing a NUL byte, so it reaches
-    // Postgres, which rejects it at the encoding level ("invalid byte
-    // sequence for encoding UTF8: 0x00") — an uncaught
-    // PrismaClientUnknownRequestError. AllExceptionsFilter still does its
-    // job (generic message, no leaked driver/stack detail) but the *status*
-    // should be a 400 (bad input), not a 500. See API_Test_Report.md.
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({
-      statusCode: 500,
-      timestamp: expect.any(String),
-      path: '/employees',
-      message: 'Internal server error',
-    });
+    // Previously a 500: class-validator's @IsString() accepted any string,
+    // including one containing a NUL byte, so it reached Postgres and got
+    // rejected at the encoding level ("invalid byte sequence for encoding
+    // UTF8: 0x00") as an uncaught PrismaClientUnknownRequestError.
+    // CreateEmployeeDto's @Matches(NO_CONTROL_CHARACTERS) now catches this
+    // at validation time instead.
+    expectGracefulErrorShape(res);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toEqual(
+      expect.arrayContaining([expect.stringContaining('control characters')]),
+    );
   });
 
-  it('FINDING: an extremely long (100,000 char) name is accepted with no length cap', async () => {
+  it('an extremely long (100,000 char) name -> 400, rejected by @MaxLength', async () => {
     const hugeName = 'A'.repeat(100_000);
     const res = await api()
       .post('/employees')
       .set(authHeader(token))
       .send({ name: hugeName, age: 30, position: 'QA', salary: 1000000 });
-    // CreateEmployeeDto has no @MaxLength on name/position, and the Prisma
-    // column is unbounded TEXT, so this succeeds today — recorded in
-    // API_Test_Report.md as a recommended validation gap to close
-    // (storage-abuse / oversized-payload risk), not treated as correct
-    // behavior just because it doesn't error.
-    expect(res.status).toBe(201);
-    createdIds.push(res.body.id);
+    // Previously accepted with no cap (unbounded Prisma TEXT column,
+    // CreateEmployeeDto had no @MaxLength) — a storage-abuse/oversized-
+    // payload vector. Now rejected at the validation layer.
+    expectGracefulErrorShape(res);
+    expect(res.status).toBe(400);
   });
 
-  it('FINDING: a salary far beyond the Decimal(14,2) column range 500s (should 400)', async () => {
+  it('a salary far beyond the Decimal(14,2) column range -> 400, not a 500', async () => {
     const res = await api()
       .post('/employees')
       .set(authHeader(token))
       .send({ name: 'Overflow Test', age: 30, position: 'QA', salary: 1e30 });
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({
-      statusCode: 500,
-      timestamp: expect.any(String),
-      path: '/employees',
-      message: 'Internal server error',
-    });
+    // Previously a 500 (uncaught Postgres "numeric field overflow").
+    // CreateEmployeeDto.salary now has an explicit @Max matching the
+    // Decimal(14,2) column's range.
+    expectGracefulErrorShape(res);
+    expect(res.status).toBe(400);
   });
 
   it('age/salary as arrays or objects -> 400, not coerced', async () => {
@@ -236,7 +231,7 @@ describe('Fuzz', () => {
       expect(status.errors).toHaveLength(3);
     });
 
-    it('FINDING: a row with the WRONG COLUMN COUNT fails the entire job instead of skip-and-collect', async () => {
+    it('a row with the WRONG COLUMN COUNT is skipped, not fatal to the whole job', async () => {
       const csv =
         'name,age,position,salary\n' +
         'Good Row,30,QA,1000000\n' +
@@ -249,22 +244,20 @@ describe('Fuzz', () => {
       expect(res.status).toBe(202);
 
       const status = await pollUntilSettled(res.body.jobId);
-      // Documented finding: docs/superpowers/AUDIT.md #3 / csv-import.md
-      // describe "skip-and-collect" as the resolved behavior for invalid
-      // rows, but that only covers rows CsvImportProcessor.validateRow()
-      // gets to see. A structurally malformed row (wrong column count) makes
-      // csv-parse itself throw ("Invalid Record Length: columns length is 4,
-      // got 2 on line N") from inside the `for await` loop, which
-      // csv-import.processor.ts's outer try/catch treats as fatal —
-      // "Good Row" (already flushed) stays imported, but the job ends in
-      // `failed`, `errors` carries the parser's own message, and "Another
-      // Good Row" (after the bad line) is never even seen. A 20,000-row file
-      // with one wrong-column-count row anywhere in it would fail the same
-      // way. See API_Test_Report.md for the recommended fix
-      // (`relax_column_count: true` + an explicit column-count check inside
-      // validateRow, so this becomes a skipped row like any other).
-      expect(status.state).toBe('failed');
-      expect(status.errors?.[0]).toMatch(/Invalid Record Length/);
+      // Previously: csv-parse threw ("Invalid Record Length: columns length
+      // is 4, got 2 on line N") from inside the streaming loop, which the
+      // processor's outer try/catch treated as fatal — the job ended in
+      // `failed` and "Another Good Row" (after the bad line) was never even
+      // seen, contradicting AUDIT.md #3's documented skip-and-collect
+      // resolution. csv-import.processor.ts now parses with
+      // `relax_column_count: true`, so a short row's missing fields surface
+      // as `undefined` and validateRow() rejects it like any other invalid
+      // row — both good rows import, the bad one is skipped and reported.
+      expect(status.state).toBe('completed');
+      expect(status.imported).toBe(2);
+      expect(status.skipped).toBe(1);
+      expect(status.errors).toHaveLength(1);
+      expect(status.errors?.[0]).toMatch(/Row 2/);
     });
 
     it('a file with a .csv extension but binary/garbage content -> handled gracefully, no crash', async () => {

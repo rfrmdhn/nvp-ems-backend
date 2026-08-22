@@ -154,15 +154,14 @@ describe('Security', () => {
   });
 
   describe('Error responses never leak internals', () => {
-    it('a DB-overflow-triggering salary produces a generic 500 message, no stack trace / Prisma error text', async () => {
+    it('a would-be-DB-overflow salary is rejected at validation (400), never leaks Prisma/stack details', async () => {
       const res = await api()
         .post('/employees')
         .set(authHeader(token))
         .send(validEmployeePayload({ salary: 1e30 }));
-      // Documented as a finding in API_Test_Report.md: this SHOULD be a 400
-      // (missing upper-bound validation matching the Decimal(14,2) column),
-      // but whatever status it is, it must never leak Prisma/stack details.
-      expect(res.status).toBeGreaterThanOrEqual(400);
+      // CreateEmployeeDto.salary now has an explicit @Max matching the
+      // Decimal(14,2) column, so this never reaches Postgres at all.
+      expect(res.status).toBe(400);
       const body = JSON.stringify(res.body);
       expect(body).not.toMatch(/at\s+.*\.(ts|js):\d+/); // no stack-frame-looking text
       expect(body.toLowerCase()).not.toContain('prisma');
