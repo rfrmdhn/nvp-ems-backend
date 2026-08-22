@@ -316,8 +316,8 @@
                 {
                   "key": "file",
                   "type": "file",
-                  "src": [],
-                  "description": "Pick backend/scripts/sample-employees.csv for a quick test (20 rows), or generate a large one first: `node scripts/generate-large-csv.mjs 25000` -> scripts/generated-employees.csv (25,000 rows, satisfies the brief's 20,000+ requirement)."
+                  "src": "scripts/sample-employees.csv",
+                  "description": "Defaults to scripts/sample-employees.csv (20 rows) so this request runs unattended under Newman with `--working-dir` set to the backend/ directory (see package.json's test:postman script). Swap in scripts/generated-employees.csv (run `node scripts/generate-large-csv.mjs 25000` first) to exercise the 20,000+-row path interactively in the Postman app."
                 }
               ]
             },
@@ -419,6 +419,192 @@
               "body": "event: employee.created\nid: 2026-08-20T06:46:18.425Z\ndata: {\"id\":\"6dab9229-6a51-4ecb-8926-14c4d2b05808\",\"name\":\"Siti Aminah\",\"age\":34,\"position\":\"QA Engineer\",\"salary\":\"11000000\",\"createdAt\":\"2026-08-20T06:46:18.112Z\",\"updatedAt\":\"2026-08-20T06:46:18.112Z\"}\n\nevent: csv-import.progress\nid: 2026-08-20T06:47:13.300Z\ndata: {\"jobId\":\"1\",\"processed\":831,\"total\":831,\"percent\":99,\"rowsProcessed\":20}\n\nevent: csv-import.completed\nid: 2026-08-20T06:47:13.301Z\ndata: {\"jobId\":\"1\",\"imported\":20,\"skipped\":0,\"errors\":[]}\n"
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Security & Negative Tests",
+      "description": "Automation-safe negative-path checks, runnable unattended via `npm run test:postman` (Newman) or by clicking through in the Postman app after running Login. Deeper security/fuzz coverage (JWT tampering, injection, malformed payloads) lives in test/api/security.e2e-spec.ts and test/api/fuzz.e2e-spec.ts — this folder stays intentionally small, matching the collection's role as the human-runnable/demoable smoke+happy-path artifact.",
+      "item": [
+        {
+          "name": "Login - Wrong Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('generic message, no user-enumeration signal', () => {",
+                  "  pm.expect(pm.response.json().message).to.eql('Invalid credentials');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@nusantaradigital.test\",\n  \"password\": \"wrong-password\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+          },
+          "response": []
+        },
+        {
+          "name": "List Employees - No Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/employees", "host": ["{{baseUrl}}"], "path": ["employees"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Employee - Mass Assignment (extra field)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request (forbidNonWhitelisted, not silently dropped)', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mass Assignment Test\",\n  \"age\": 30,\n  \"position\": \"QA\",\n  \"salary\": 1000000,\n  \"isAdmin\": true\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/employees", "host": ["{{baseUrl}}"], "path": ["employees"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Employee - Client-Supplied Id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request (id is never taken from the body)', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"11111111-1111-1111-1111-111111111111\",\n  \"name\": \"Client Id Test\",\n  \"age\": 30,\n  \"position\": \"QA\",\n  \"salary\": 1000000\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/employees", "host": ["{{baseUrl}}"], "path": ["employees"] }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Employee - Malformed UUID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request (ParseUUIDPipe, never reaches Prisma)', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/employees/not-a-uuid",
+              "host": ["{{baseUrl}}"],
+              "path": ["employees", "not-a-uuid"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Employees - SQL-Injection-Shaped Search",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK, treated as a literal substring (Prisma is parameterized)', () => pm.response.to.have.status(200));",
+                  "pm.test('zero matches, no error', () => pm.expect(pm.response.json().total).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/employees?search=' OR 1=1; DROP TABLE employees;--",
+              "host": ["{{baseUrl}}"],
+              "path": ["employees"],
+              "query": [{ "key": "search", "value": "' OR 1=1; DROP TABLE employees;--" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Upload CSV - Rejected Extension",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request (fileFilter runs before the job is ever enqueued)', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "README.md",
+                  "description": "Any non-.csv file works here — README.md is just something that's always present in the repo. Uploaded under field name 'file' like a real CSV would be; the fileFilter rejects it by extension alone."
+                }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/csv-import/upload", "host": ["{{baseUrl}}"], "path": ["csv-import", "upload"] }
+          },
+          "response": []
         }
       ]
     }

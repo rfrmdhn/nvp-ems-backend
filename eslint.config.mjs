@@ -32,4 +32,19 @@ export default tseslint.config(
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },
+  {
+    // Black-box HTTP specs (test/api/**) assert on supertest's untyped
+    // `Response.body` (real JSON from a live server, not a typed fixture) —
+    // that's the actual point of a black-box contract/security/fuzz test,
+    // so the usual "don't let `any` propagate through app code" rationale
+    // for these rules doesn't apply here the way it does under src/.
+    files: ['test/api/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+    },
+  },
 );

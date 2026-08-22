@@ -3,6 +3,13 @@
 Behavior/edge cases for `/employees`. See `EMS-BACKEND-PLAN.md` §5. All routes require a valid
 JWT (see `specs/auth.md`'s protected-route table) — omitted below for brevity.
 
+**Wire format note (confirmed by `test/api/contract.e2e-spec.ts` against the live Swagger doc):**
+`salary` is a Prisma `Decimal` with no custom JSON serializer, so every response — `POST`, `GET`
+(single and list), `PUT`, `DELETE` — returns it as a **numeric string** (e.g. `"12000000"`), never
+a JSON `number`. `age` is a normal `number`. This is documented in Swagger via
+`EmployeeResponseDto` (`src/employees/dto/employee-response.dto.ts`) — before this DTO existed,
+`/api/docs` didn't document a response schema for these routes at all.
+
 ## POST /employees
 
 | Input | Expected behavior |

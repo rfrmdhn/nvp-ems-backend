@@ -21,10 +21,19 @@ Required coverage for Employees, mapped to the brief's "Unit Test: CRUD employee
 
 All mock `PrismaService` and `EmployeeCreatedProducer` — no real DB/Redis connection needed.
 
-## Not implemented this phase (candidates if scope expands)
+## Implemented — `test/api/*.e2e-spec.ts` (black-box, against a running `docker compose` stack)
 
-- E2E tests hitting the real HTTP routes with `ParseUUIDPipe`/`ValidationPipe` in the loop (the
-  unit tests above cover the service layer only, not controller-level validation behavior
-  described in `specs/employees.md`).
-- A test asserting every Employees route actually 401s without a JWT (currently guaranteed by
-  code inspection — `@UseGuards(JwtAuthGuard)` at the controller-class level — not by a test).
+Both items below are done, as part of the fuller 9-type API test pass documented in
+`../../../API_Test_Report.md`:
+
+- Controller-level HTTP behavior (`ParseUUIDPipe`/`ValidationPipe` in the loop, not just the
+  service layer) — `test/api/functional-employees.e2e-spec.ts` covers the full CRUD +
+  pagination/search/sort table above end-to-end, plus mass-assignment (client-supplied `id`) and
+  malformed-`:id` cases.
+- Every Employees route 401s without a JWT, plus tampered/expired/`alg: none` JWTs — no longer
+  code-inspection-only — `test/api/security.e2e-spec.ts`.
+
+See `API_Test_Report.md` for the two validation gaps this pass actually found (an unbounded
+`name`/`position` length, and a `salary` value beyond the `Decimal(14,2)` column range 500ing
+instead of 400ing) — both still open, listed there as recommendations rather than fixed in this
+pass.

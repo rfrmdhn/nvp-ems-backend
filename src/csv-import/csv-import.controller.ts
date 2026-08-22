@@ -16,6 +16,7 @@ import {
   ApiBearerAuth,
   ApiConsumes,
   ApiOperation,
+  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { diskStorage } from 'multer';
@@ -23,6 +24,10 @@ import { extname, join } from 'path';
 import { randomUUID } from 'crypto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CsvImportService } from './csv-import.service';
+import {
+  CsvImportStatusResponseDto,
+  CsvUploadResponseDto,
+} from './dto/csv-import-response.dto';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
 const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024; // 200 MB
@@ -43,6 +48,8 @@ export class CsvImportController {
   @Post('upload')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 202, type: CsvUploadResponseDto })
+  @ApiResponse({ status: 400, description: 'No file, or not a .csv file' })
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
@@ -81,6 +88,8 @@ export class CsvImportController {
     summary:
       "Poll a csv-import job's state/progress — fallback for a client that missed the SSE events",
   })
+  @ApiResponse({ status: 200, type: CsvImportStatusResponseDto })
+  @ApiResponse({ status: 404, description: 'Import job not found' })
   async status(@Param('jobId') jobId: string) {
     const status = await this.csvImportService.getStatus(jobId);
 

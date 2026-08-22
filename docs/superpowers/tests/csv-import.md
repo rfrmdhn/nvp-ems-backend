@@ -41,7 +41,23 @@ files on disk (`fs.mkdtempSync`) with `PrismaService`/`NotificationsService` moc
 - A missing source file causes `NotificationsService.notifyCsvImportFailed` to fire and the job
   to reject, rather than silently resolving.
 
-Item 5 (integration, real Postgres/Redis) and item 6 (load/stress, 20,000+ row memory profile)
-remain deferred per root `CLAUDE.md`'s Testing Strategy — not required for this technical test,
-but `scripts/generate-large-csv.mjs 20000` plus manual memory observation was used to sanity-check
-the "never buffer the whole file" claim during implementation.
+## Now implemented
+
+- **Item 5 (integration, black-box against a real running stack)**:
+  `test/api/functional-csv-import.e2e-spec.ts` uploads `scripts/sample-employees.csv`, polls
+  `GET /csv-import/:jobId/status` to `completed`, and asserts `imported: 20, skipped: 0`.
+  `test/api/integration-workflow.e2e-spec.ts` chains this into the full
+  login → create → SSE → CSV import → list workflow.
+- **Item 6 (load/stress, 20,000+ row memory profile)**: `test/load/csv-memory-profile.sh` samples
+  the `worker` container's RSS via `docker stats` while a large import runs. Actual runs (see
+  `API_Test_Report.md`): 25,000 rows in ~1.2s and 100,000 rows in ~3.2s, worker RSS flat at
+  ~65-67MB in both cases — empirically confirms the "never buffer the whole file" claim, not just
+  by code inspection.
+
+One genuine gap surfaced by `test/api/fuzz.e2e-spec.ts` while covering this area: a row with the
+**wrong column count** (structurally malformed, not just semantically invalid) makes `csv-parse`
+itself throw from inside the streaming loop, which the processor's outer `try/catch` treats as
+fatal — the whole job ends in `failed`, not skip-and-collect, contradicting `AUDIT.md` #3's
+documented resolution. See `API_Test_Report.md` for the reproduction and recommended fix
+(`relax_column_count: true` + an explicit column-count check inside `validateRow`); not fixed in
+this pass.

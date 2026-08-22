@@ -83,26 +83,39 @@ progress). Unit + this scope of integration (each test exercises a service/proce
 mocked Prisma/Redis layer, not a live DB) is the floor for this project — do not skip it for a
 new feature.
 
-On top of that floor, the following testing types are **deliberately deferred, not silently
-omitted**, for this technical test:
+On top of that floor, a full 9-type black-box API test pass (smoke, functional, contract,
+integration, regression, load, stress, security, fuzz) has since been implemented against a
+running `docker compose` stack — see `API_Test_Report.md` for results, findings, and severity, and
+run it yourself:
 
-- **Smoke testing** — not automated; `docker compose up --build` succeeding and `GET /` returning
-  a health payload is the manual smoke check today.
-- **Contract testing** — not set up; no external consumer beyond the sibling frontend repo exists
-  yet to make a formal contract test worthwhile.
-- **Integration testing** (full HTTP-layer, real DB/Redis) — `test/app.e2e-spec.ts` is a
-  placeholder from Nest's starter; expanding it to real cross-layer flows (login → create
-  employee → see SSE event) is listed as a next-phase candidate in `docs/superpowers/tests/*.md`.
-- **Regression testing** — no bugs have been filed yet to regress against; the practice (a
-  reproducing test added alongside every fix) should start with the first real bug fix.
-- **Load / stress testing** — explicitly relevant to the CSV-import feature (20,000+ rows, memory
-  ceiling under streaming) — `docs/superpowers/tests/csv-import.md` lists this as required once
-  the real streaming/batch-insert logic ships, not before.
-- **Security testing** — the JWT-guard-on-every-route rule above is today verified by code
-  inspection, not an automated test; adding a "every Employees/CSV-import route 401s without a
-  token" test is a listed next-step in `docs/superpowers/tests/employees.md`.
-- **Fuzz testing** — relevant to CSV row parsing (malformed rows, wrong column counts, encoding
-  issues) once the real parser exists; not applicable to the current stub.
+```bash
+docker compose up --build -d          # stack must be running for every suite below
+npm run test:e2e                       # smoke/functional/contract/integration/security/fuzz — test/api/*.e2e-spec.ts
+npm run test:postman                   # Postman collection via Newman (Auth/Employees/CSV Import/Security folders)
+npm run test:load                      # k6, steady 20 VUs / 1 min — needs Docker (grafana/k6 image)
+npm run test:stress                    # k6, ramps 10->300 VUs over ~3 min
+./test/load/csv-memory-profile.sh      # worker RSS while importing a large CSV
+```
+
+- **Smoke** — `test/api/smoke.e2e-spec.ts` (GET /, login, Swagger reachability, unknown-route 404).
+- **Contract** — `test/api/contract.e2e-spec.ts` validates real responses against the app's own
+  live-generated OpenAPI doc (`/api/docs-json`) via `ajv`. This surfaced a real gap (no response
+  schema was documented for Employees/CSV-import routes at all, and `salary` needed documenting as
+  a string) — fixed via `src/employees/dto/employee-response.dto.ts` and
+  `src/csv-import/dto/csv-import-response.dto.ts`, wired up with `@ApiResponse({ type: ... })`.
+- **Integration** — `test/api/integration-workflow.e2e-spec.ts`: login → create employee → SSE
+  `employee.created` received → CSV import → poll to completion → `GET /employees` reflects both.
+- **Regression** — there was no prior baseline; this pass establishes one (the full suite below +
+  the OpenAPI snapshot the contract test validates against).
+- **Load / stress** — `test/load/{load,stress}.js` (k6, via the `grafana/k6` Docker image) plus
+  `test/load/csv-memory-profile.sh` for the CSV-import memory claim specifically.
+- **Security** — `test/api/security.e2e-spec.ts`: 401 on every guarded route without/with a
+  tampered/`alg:none` JWT, mass-assignment (`400` on a client-supplied `id` or unknown field),
+  injection-shaped `search` values treated as literal data.
+- **Fuzz** — `test/api/fuzz.e2e-spec.ts`: malformed JSON, wrong types, huge strings, CSV
+  structural/semantic malformation. Found two real gaps (unbounded name/position length; a
+  wrong-column-count CSV row failing the whole job instead of skip-and-collect) — both documented
+  as open findings in `API_Test_Report.md`, not fixed in this pass.
 
 ## Environments
 

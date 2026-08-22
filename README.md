@@ -83,12 +83,52 @@ Unit tests mock `PrismaService`/`NotificationsService`/BullMQ producers directly
 needs no live Postgres or Redis connection. See `docs/superpowers/tests/` for what's covered per
 feature and what's intentionally deferred.
 
+### Full API test suite (smoke/functional/contract/integration/regression/load/stress/security/fuzz)
+
+Everything below is a **black-box** test — it hits a real, running instance over HTTP, so start
+the stack first:
+
+```bash
+docker compose up --build -d
+```
+
+Then, from this directory:
+
+```bash
+npm run test:e2e       # smoke, functional, contract, integration, security, fuzz — test/api/*.e2e-spec.ts
+npm run test:postman   # the Postman collection (postman/EMS.postman_collection.json) via Newman
+npm run test:load       # k6 load test (steady 20 VUs / 1 min) — needs Docker, pulls grafana/k6 once
+npm run test:stress     # k6 stress test (ramps 10 -> 300 VUs over ~3 min)
+./test/load/csv-memory-profile.sh   # samples worker RSS during a large CSV import
+```
+
+Notes:
+
+- `test:e2e` targets `http://localhost:3000` by default; override with `API_BASE_URL` (and
+  `ADMIN_EMAIL`/`ADMIN_PASSWORD` if you changed the seeded admin) if your stack runs elsewhere.
+- `test:load`/`test:stress` run k6 via the official `grafana/k6` Docker image over
+  `--network host`, rather than requiring a native `k6` install.
+- `test:postman` deliberately excludes the collection's "Notifications" folder — an SSE stream
+  request has no natural end, so it isn't a good fit for an unattended Newman run (same reason the
+  collection's own description recommends `curl -N` for manually testing that one). The SSE path
+  is covered instead by `test/api/integration-workflow.e2e-spec.ts`.
+- Every test in `test/api/` creates and deletes its own employees (see each spec's
+  `beforeAll`/`afterAll`), but `test:postman`/`test:load`/`test:stress`/the memory-profile script
+  do leave rows behind (Postman's happy-path Create/Delete pair cleans itself up, but its CSV
+  upload and k6's traffic do not) — `docker compose down -v && docker compose up --build -d` gives
+  you a clean seeded database again if that matters for what you're doing next.
+- Results from an actual run of all of the above — latency numbers, the stress test's observed
+  breaking point (or lack of one), and every finding — are in
+  [`API_Test_Report.md`](./API_Test_Report.md).
+
 ## API docs & Postman
 
 - **Swagger** (interactive, generated from the running app): `GET /api/docs` once the API is up.
 - **Postman collection**: [`postman/EMS.postman_collection.json`](./postman/EMS.postman_collection.json)
   — import into Postman, set `{{baseUrl}}` (defaults to `http://localhost:3000`), run "Login"
-  first to auto-populate `{{token}}` for the guarded requests.
+  first to auto-populate `{{token}}` for the guarded requests. Includes a "Security & Negative
+  Tests" folder (401/400/mass-assignment/injection-shaped-input checks) alongside the happy-path
+  requests; runnable unattended via `npm run test:postman` (Newman) — see "Running tests" above.
 
 ## CSV import test data
 
