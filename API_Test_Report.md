@@ -27,7 +27,7 @@ How to reproduce everything in this report: see `README.md`'s "Full API test sui
 | Integration | Jest + supertest + native `fetch`/SSE (`test/api/integration-workflow.e2e-spec.ts`) | ✅ 1/1 pass |
 | Regression | Jest unit suite + full black-box suite (this pass **establishes** the baseline — see §7) | ✅ 21 unit + 78 black-box, all pass |
 | Load | k6 via `grafana/k6` (`test/load/load.js`) | ✅ p95 11.34ms, 0% errors, well under target SLA |
-| Stress | k6 via `grafana/k6` (`test/load/stress.js`) | ✅ no breaking point found up to 300 VUs — see §5 |
+| Stress | k6 via `grafana/k6` (`test/load/stress.js`) | ✅ breaking point found at 1000–1500 VUs — see §5 |
 | Security | Jest + supertest (`test/api/security.e2e-spec.ts`) | ✅ 24/24 pass — no vulnerabilities found |
 | Fuzz | Jest + supertest (`test/api/fuzz.e2e-spec.ts`) | ✅ 17/17 pass — 4 gaps found, **all fixed**, see §6 |
 
@@ -36,10 +36,11 @@ requests (9/9 assertions) pass via Newman. `npm run lint` / `npm run build` are 
 
 **Bottom line**: no security vulnerability was found (access control, JWT handling, injection,
 mass assignment all hold up under active testing). Fuzz testing found four genuine
-functional/validation gaps (§6) and load/stress testing found one operational gap (§5) — **all
-five are fixed and re-verified in this pass**, not left as recommendations. One contract gap
-(undocumented response schemas, plus a wire-format subtlety) was also fixed, since "make the spec
-accurate" was explicitly in scope from the start.
+functional/validation gaps (§8) and load/stress testing found one operational gap (§5) — **all
+five are fixed and re-verified in this pass**, not left as recommendations. The stress test's one
+open question (how far past 300 VUs this API actually goes) was also run down to a real answer
+(~1000–1500 VUs). One contract gap (undocumented response schemas, plus a wire-format subtlety)
+was fixed too, since "make the spec accurate" was explicitly in scope from the start.
 
 ---
 
@@ -96,23 +97,29 @@ http_req_failed:   0.00%           ✓ (threshold: rate<1%)
 
 Comfortably inside the SLA — roughly **26x** better than the p95 target, zero errors.
 
-### Stress (`test/load/stress.js`) — ramp 10 → 300 VUs over 3 minutes
+### Stress (`test/load/stress.js`) — ramp 10 → 1500 VUs over 3.5 minutes
+
+First pass (ramp 10 → 300 VUs, 30s/step): **no breaking point found** — 0.00% errors across
+45,338 requests, p95 = 85.87ms even at 300 peak VUs. That result is exactly why finding G below
+was originally left open with a recommendation to "re-run with a higher ceiling" — so this pass
+did that:
 
 ```
-Stage:        10 VUs → 50 → 100 → 200 → 300 → 0, 30s per step
-http_req_duration: avg=22.61ms  p90=64.97ms  p95=85.87ms  max=287.44ms
-http_req_failed:   0.00% (0 of 45,338 requests)
-45,338 total requests, 37,861 iterations, 300 peak VUs, 251 req/s peak
+Stage:        10 VUs → 100 → 300 → 600 → 1000 → 1500 → 0, 30s per step
+http_req_duration: avg=682.93ms  p90=767.01ms  p95=971.99ms  max=60.0s (client timeout)
+http_req_failed:   0.27% (231 of 82,538 requests)
+82,538 total requests, 68,754 iterations, 1500 peak VUs, 392 req/s peak
 ```
 
-**No breaking point was found within the tested range.** Latency degrades gracefully under load
-but the error rate stayed at **0.00%** throughout — there's no rate limiter or connection-pool
-guard that would produce a clean `429`/`503` on `/employees` (the login-specific throttle added in
-this pass, see §6, doesn't apply here), and Postgres/Prisma's connection pool absorbed 300
-concurrent VUs without saturating. **Open recommendation (G, not pursued further in this pass)**:
-re-run with a higher ceiling (600–1000+ VUs) to find the actual limit — the working assumption is
-Prisma's Postgres connection pool would be the first thing to saturate, but that wasn't reached
-here.
+**Finding G — resolved**: the breaking point is somewhere in the **1000–1500 VU** range, not
+below it. 0% errors persist through 300 VUs (confirmed twice); pushing to 1000–1500 VUs produces
+a real, if still small (0.27%), rate of client-side request timeouts (60s) and p95 climbing past
+900ms — degradation, not a clean `429`/`503` (there's no rate limiter or connection-pool guard on
+`/employees`; the login-specific throttle from finding E doesn't apply here). Root cause wasn't
+pinned down further in this pass (a `docker stats`-during-the-run sample, the same technique
+`csv-memory-profile.sh` uses, would be the next step to confirm Postgres/Prisma connection-pool
+saturation vs. something else) — but the actual breaking point, which was the open question, is
+now answered rather than merely "not reached at 300."
 
 **Side effect found and fixed**: the stress run's ~8,000 `POST /employees` calls each enqueue an
 `employee-created` BullMQ job, and `EmployeeCreatedProcessor` has a deliberate
@@ -309,12 +316,13 @@ timed out, and why).
 | D | Low | Employees validation | No max length on `name`/`position` | ✅ Fixed — `@MaxLength(255)` |
 | E | Low | Auth | No rate limiting on `POST /auth/login` | ✅ Fixed — `@nestjs/throttler`, 25/min per IP |
 | F | Info | Load/stress | Stress-level create traffic backlogged `employee-created` notifications by minutes | ✅ Fixed — `concurrency: 5` on the processor |
-| G | Info | Stress test | No breaking point found up to 300 VUs | Open — re-run with a higher VU ceiling if the actual limit matters |
+| G | Info | Stress test | Breaking point unknown beyond "not reached at 300 VUs" | ✅ Resolved — re-run to 1500 VUs found it: ~1000–1500 VUs, manifesting as request timeouts + rising p95, not a clean error |
 | — | — | Contract | Undocumented response schemas; `salary`-as-string was implicit | ✅ Fixed — response DTOs + `@ApiResponse` |
 
 Every fix above was manually re-verified against the running API (see each finding's "Re-verified"
 note in §5/§6/§8) and the full suite (78 black-box + 21 unit + 15 Postman) was re-run green after
-all fixes landed. Only **G** remains open — it's a "test further" item, not a defect.
+all fixes landed. Nothing remains open from the original findings list — G was a "test further"
+item, not a defect, and has now been tested further.
 
 ## What changed in this pass
 
@@ -333,6 +341,10 @@ all fixes landed. Only **G** remains open — it's a "test further" item, not a 
     route only — finding E.
 - **Postman**: fixed `Upload CSV`'s `formdata.src` so it works unattended under Newman; added a
   "Security & Negative Tests" folder (7 requests, 9 assertions).
+- **Test fixtures**: `scripts/invalid-employees.csv` (new) — copied from the frontend's own
+  `frontend/e2e/fixtures/invalid-employees.csv` (kept byte-identical) so both repos test against
+  the same malformed-CSV input; wired into `fuzz.e2e-spec.ts`'s skip-and-collect test in place of
+  an inline string.
 - **Config**: `package.json` — `newman`/`ajv`/`@nestjs/throttler` dependencies,
   `test:postman`/`test:load`/`test:stress` scripts; `eslint.config.mjs` — relaxed `no-unsafe-*` for
   `test/api/**` only (these specs assert on supertest's untyped `Response.body`, i.e. real JSON

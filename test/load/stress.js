@@ -5,11 +5,15 @@ import { Rate } from 'k6/metrics';
 /**
  * Stress test: ramps well past normal traffic to find where this API
  * actually breaks and how it degrades (timeouts, connection-pool exhaustion,
- * rising latency) — there's no rate limiter or autoscaling in this stack, so
- * the expected failure mode is Postgres/Prisma connection-pool saturation,
- * not a clean 429. Run via `npm run test:stress`. Observed breaking point
- * and failure mode are recorded in API_Test_Report.md (from an actual run,
- * not predicted ahead of time).
+ * rising latency) — there's no rate limiter or autoscaling on `/employees`
+ * (the login-only throttle added for API_Test_Report.md finding E doesn't
+ * apply here), so the expected failure mode is Postgres/Prisma connection-
+ * pool saturation, not a clean 429. Run via `npm run test:stress`.
+ *
+ * Observed breaking point (see API_Test_Report.md §5): 0% errors up through
+ * 300 VUs; ramping further to 1000-1500 VUs produces a small (~0.27%) but
+ * real rate of client-side request timeouts and p95 rising past 900ms — the
+ * breaking point is somewhere in the 1000-1500 VU range, not below it.
  */
 
 const BASE_URL = __ENV.API_BASE_URL || 'http://localhost:3000';
@@ -23,10 +27,11 @@ export const options = {
       startVUs: 10,
       stages: [
         { duration: '30s', target: 10 },
-        { duration: '30s', target: 50 },
         { duration: '30s', target: 100 },
-        { duration: '30s', target: 200 },
         { duration: '30s', target: 300 },
+        { duration: '30s', target: 600 },
+        { duration: '30s', target: 1000 },
+        { duration: '30s', target: 1500 },
         { duration: '30s', target: 0 },
       ],
       gracefulRampDown: '10s',

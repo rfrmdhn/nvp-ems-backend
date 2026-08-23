@@ -1,3 +1,4 @@
+import path from 'path';
 import { api, authHeader, getAuthToken } from './helpers/client';
 
 /**
@@ -212,23 +213,24 @@ describe('Fuzz', () => {
     });
 
     it('a .csv with semantically-invalid-but-same-column-count rows -> skip-and-collect works', async () => {
-      const csv =
-        'name,age,position,salary\n' +
-        'Good Row,30,QA,1000000\n' +
-        ',25,QA,1000000\n' + // blank name
-        'Bad Age,not-a-number,QA,1000000\n' +
-        'Negative Salary,25,QA,-500\n';
+      // scripts/invalid-employees.csv: 1 valid row + blank name + non-numeric
+      // age + non-numeric salary + negative salary — shared with the
+      // frontend's own e2e fixture (frontend/e2e/fixtures/invalid-employees.csv)
+      // so both sides of the stack exercise the exact same malformed input.
       const res = await api()
         .post('/csv-import/upload')
         .set(authHeader(token))
-        .attach('file', Buffer.from(csv), 'semantically-invalid.csv');
+        .attach(
+          'file',
+          path.join(__dirname, '../../scripts/invalid-employees.csv'),
+        );
       expect(res.status).toBe(202);
 
       const status = await pollUntilSettled(res.body.jobId);
       expect(status.state).toBe('completed');
       expect(status.imported).toBe(1);
-      expect(status.skipped).toBe(3);
-      expect(status.errors).toHaveLength(3);
+      expect(status.skipped).toBe(4);
+      expect(status.errors).toHaveLength(4);
     });
 
     it('a row with the WRONG COLUMN COUNT is skipped, not fatal to the whole job', async () => {

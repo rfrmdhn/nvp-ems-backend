@@ -1,0 +1,6 @@
+name,age,position,salary
+E2E Fixture Valid Row,32,Marketing Specialist,7000000
+,32,Marketing Specialist,7000000
+E2E Fixture Bad Age,not-a-number,Sales Executive,7500000
+E2E Fixture Bad Salary,29,Accountant,not-a-number
+E2E Fixture Negative Salary,29,Accountant,-500

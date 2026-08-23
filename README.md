@@ -133,6 +133,11 @@ Notes:
 ## CSV import test data
 
 - `scripts/sample-employees.csv` — ~20 realistic rows for a quick manual test.
+- `scripts/invalid-employees.csv` — 1 valid row + 4 deliberately broken ones (blank name,
+  non-numeric age, non-numeric salary, negative salary), for exercising skip-and-collect. Shared
+  with the frontend's own e2e fixture (`../frontend/e2e/fixtures/invalid-employees.csv`, kept
+  byte-identical) so both sides of the stack test against the same malformed input. Used by
+  `test/api/fuzz.e2e-spec.ts`'s "semantically-invalid-but-same-column-count rows" case.
 - `scripts/sample-employees-large.csv` — 20,000 rows, committed to the repo so the bulk-import
   path can be exercised at the brief's minimum scale without generating a file first. Verified
   end-to-end via `docker compose up --build`: uploads in ~20ms (202 Accepted, non-blocking),
